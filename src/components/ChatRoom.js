@@ -1,52 +1,97 @@
-// components/ChatRoom.js
 import React, { useState, useEffect, useRef } from 'react';
+import { chatAPI } from '../services/api';
 
 const ChatRoom = ({ currentUser, onLogout }) => {
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState([]);
   const [onlineUsers, setOnlineUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
   const messagesEndRef = useRef(null);
 
-  // Initialize messages from localStorage
+  // Initialize messages and online users
   useEffect(() => {
-    const savedMessages = JSON.parse(localStorage.getItem('chatMessages')) || [];
-    setMessages(savedMessages);
+    const fetchData = async () => {
+      try {
+        // Fetch messages from API
+        const messagesResponse = await chatAPI.getMessages();
+        setMessages(messagesResponse.data.messages);
+        
+        // Fetch online users
+        const usersResponse = await chatAPI.getOnlineUsers();
+        setOnlineUsers(usersResponse.data.users);
+      } catch (error) {
+        console.error('Error fetching data:', error);
+        // Fallback to showing just current user
+        setOnlineUsers([{ username: currentUser.username, isCurrentUser: true }]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
     
-    // Simulate online users
-    const users = JSON.parse(localStorage.getItem('users')) || [];
-    setOnlineUsers(users.map(u => u.username));
-  }, []);
+    // Set up interval to refresh online users every 30 seconds
+    const interval = setInterval(async () => {
+      try {
+        const usersResponse = await chatAPI.getOnlineUsers();
+        setOnlineUsers(usersResponse.data.users);
+      } catch (error) {
+        console.error('Error refreshing online users:', error);
+      }
+    }, 30000);
+
+    return () => clearInterval(interval);
+  }, [currentUser]);
 
   // Scroll to bottom when new message arrives
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const handleSendMessage = (e) => {
+  const handleSendMessage = async (e) => {
     e.preventDefault();
     
-    if (!message.trim()) return;
+    if (!message.trim() || sending) return;
 
-    const newMessage = {
-      id: Date.now(),
-      text: message,
-      sender: currentUser.username,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      isOwn: true
-    };
+    setSending(true);
 
-    const updatedMessages = [...messages, newMessage];
-    setMessages(updatedMessages);
-    localStorage.setItem('chatMessages', JSON.stringify(updatedMessages));
-    setMessage('');
+    try {
+      const response = await chatAPI.sendMessage(message);
+      const newMessage = response.data.message;
+      
+      // Add the new message to the list
+      setMessages(prev => [...prev, newMessage]);
+      setMessage('');
+    } catch (error) {
+      console.error('Error sending message:', error);
+      alert('Failed to send message. Please try again.');
+    } finally {
+      setSending(false);
+    }
   };
 
   const clearChat = () => {
     if (window.confirm('Are you sure you want to clear all messages?')) {
       setMessages([]);
-      localStorage.removeItem('chatMessages');
     }
   };
+
+  const formatTime = (timestamp) => {
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  if (loading) {
+    return (
+      <div className="chat-container">
+        <div className="chat-main" style={{ justifyContent: 'center', alignItems: 'center' }}>
+          <div className="loading-spinner"></div>
+          <p>Loading chat...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="chat-container">
@@ -73,8 +118,8 @@ const ChatRoom = ({ currentUser, onLogout }) => {
             {onlineUsers.map((user, index) => (
               <div key={index} className="user-item">
                 <span className="online-indicator"></span>
-                <span>{user}</span>
-                {user === currentUser.username && <span className="you-badge">You</span>}
+                <span>{user.username}</span>
+                {user.isCurrentUser && <span className="you-badge">You</span>}
               </div>
             ))}
           </div>
@@ -82,7 +127,7 @@ const ChatRoom = ({ currentUser, onLogout }) => {
 
         <div className="sidebar-section">
           <button onClick={clearChat} className="clear-chat-button">
-            Clear Chat
+            Clear Chat History
           </button>
         </div>
       </div>
@@ -91,7 +136,7 @@ const ChatRoom = ({ currentUser, onLogout }) => {
       <div className="chat-main">
         <div className="chat-header">
           <h2>Global Chat Room</h2>
-          <p>Welcome to the community chat!</p>
+          <p>Welcome to the community chat, {currentUser.username}!</p>
         </div>
 
         <div className="messages-container">
@@ -105,11 +150,11 @@ const ChatRoom = ({ currentUser, onLogout }) => {
             messages.map((msg) => (
               <div
                 key={msg.id}
-                className={`message ${msg.isOwn ? 'own-message' : 'other-message'}`}
+                className={`message ${msg.sender === currentUser.username ? 'own-message' : 'other-message'}`}
               >
                 <div className="message-header">
                   <span className="message-sender">{msg.sender}</span>
-                  <span className="message-time">{msg.timestamp}</span>
+                  <span className="message-time">{formatTime(msg.timestamp)}</span>
                 </div>
                 <div className="message-content">
                   {msg.text}
@@ -127,9 +172,14 @@ const ChatRoom = ({ currentUser, onLogout }) => {
             onChange={(e) => setMessage(e.target.value)}
             placeholder="Type your message here..."
             className="message-input"
+            disabled={sending}
           />
-          <button type="submit" className="send-button" disabled={!message.trim()}>
-            Send
+          <button 
+            type="submit" 
+            className="send-button" 
+            disabled={!message.trim() || sending}
+          >
+            {sending ? 'Sending...' : 'Send'}
           </button>
         </form>
       </div>

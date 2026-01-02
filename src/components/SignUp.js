@@ -1,6 +1,6 @@
-// components/SignUp.js
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { authAPI } from '../services/api';
 
 const SignUp = ({ onSignup }) => {
   const [formData, setFormData] = useState({
@@ -9,6 +9,7 @@ const SignUp = ({ onSignup }) => {
     confirmPassword: ''
   });
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
   const handleChange = (e) => {
@@ -16,46 +17,59 @@ const SignUp = ({ onSignup }) => {
       ...formData,
       [e.target.name]: e.target.value
     });
+    setError('');
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    setLoading(true);
 
-    // Validation
+    // Client-side validation
+    if (!formData.username.trim() || !formData.password.trim() || !formData.confirmPassword.trim()) {
+      setError('Please fill in all fields');
+      setLoading(false);
+      return;
+    }
+
     if (formData.password !== formData.confirmPassword) {
       setError('Passwords do not match');
+      setLoading(false);
       return;
     }
 
     if (formData.password.length < 6) {
       setError('Password must be at least 6 characters');
+      setLoading(false);
       return;
     }
 
+    if (formData.username.length < 3) {
+      setError('Username must be at least 3 characters');
+      setLoading(false);
+      return;
+    }
+
+    // Only send username and password to backend
+    const signupData = {
+      username: formData.username.trim(),
+      password: formData.password
+    };
+
     try {
-      const response = await fetch('/api/signup', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          username: formData.username,
-          password: formData.password,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        setError(errorData.error || 'Something went wrong');
-        return;
-      }
-
-      const data = await response.json();
-      onSignup({ username: data.data.username });
+      const response = await authAPI.signup(signupData);
+      const { token, user } = response.data;
+      
+      // Store token and user info
+      localStorage.setItem('token', token);
+      localStorage.setItem('currentUser', JSON.stringify(user));
+      
+      onSignup(user);
       navigate('/chat');
     } catch (error) {
-      setError('Failed to connect to the server');
+      setError(error.response?.data?.message || 'Signup failed. Please try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -64,7 +78,7 @@ const SignUp = ({ onSignup }) => {
       <div className="auth-card">
         <div className="auth-header">
           <h1>Create Account</h1>
-          <p>Join our community</p>
+          <p>Join our chat community</p>
         </div>
         
         <form onSubmit={handleSubmit} className="auth-form">
@@ -78,8 +92,10 @@ const SignUp = ({ onSignup }) => {
               name="username"
               value={formData.username}
               onChange={handleChange}
-              placeholder="Choose a username"
+              placeholder="Choose a username (min 3 characters)"
               required
+              disabled={loading}
+              autoFocus
             />
           </div>
           
@@ -91,8 +107,9 @@ const SignUp = ({ onSignup }) => {
               name="password"
               value={formData.password}
               onChange={handleChange}
-              placeholder="Create a password"
+              placeholder="Create a password (min 6 characters)"
               required
+              disabled={loading}
             />
           </div>
           
@@ -106,11 +123,12 @@ const SignUp = ({ onSignup }) => {
               onChange={handleChange}
               placeholder="Confirm your password"
               required
+              disabled={loading}
             />
           </div>
           
-          <button type="submit" className="auth-button">
-            Sign Up
+          <button type="submit" className="auth-button" disabled={loading}>
+            {loading ? 'Creating account...' : 'Sign Up'}
           </button>
           
           <div className="auth-footer">
